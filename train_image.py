@@ -105,3 +105,99 @@ def get_model(model_name, num_classes):
         raise ValueError(f"Model {model_name} not supported")
     return model
 
+def train_model(model, train_loader, val_loader, criterion, optimizer, device, epochs, adaptive, batch_size):
+    model.to(device)
+    history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
+
+    for epoch in range(epochs):
+        model.train()
+        running_loss = 0.0
+        for batch_idx, (inputs, targets) in enumerate(train_loader):
+            if adaptive:
+                adaptive_batch_size = max(1, int(batch_size * (1.0 - epoch / epochs)))
+                train_loader.batch_size = adaptive_batch_size
+
+            inputs, targets = inputs.to(device), targets.to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        avg_train_loss = running_loss / len(train_loader)
+        val_loss, val_acc = evaluate_model(model, val_loader, criterion, device)
+        history["train_loss"].append(avg_train_loss)
+        history["val_loss"].append(val_loss)
+        history["val_acc"].append(val_acc)
+        print(f"Epoch [{epoch+1}/{epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
+
+    return history
+
+def evaluate_model(model, val_loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for inputs, targets in val_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            running_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+
+    avg_loss = running_loss / len(val_loader)
+    accuracy = correct / total
+    return avg_loss, accuracy
+
+def save_results(output_dir, output_name, history):
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    results_path = os.path.join(output_dir, f"{output_name}.json")
+    with open(results_path, "w") as f:
+        json.dump(history, f)
+
+def main():
+    parser = get_parser()
+    args = parser.parse_args()
+
+    torch.manual_seed(args.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device != "cuda":
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
+    print(f"Using {device} for training")
+
+    dataset_clean, dataset_noisy, dataset_test = prepare_dataset(args.dataset, args.alpha)
+
+    train_loader_phase1 = DataLoader(dataset_noisy, batch_size=args.batch_size, shuffle=True)
+    train_loader_phase2 = DataLoader(dataset_clean, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False)
+
+    if args.dataset == "mnist":
+        num_classes = 10
+    elif args.dataset == "cifar10":
+        num_classes = 10
+    elif args.dataset == "celeba":
+        num_classes = 40
+
+    model = get_model(args.model, num_classes)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    print("Starting Phase 1 Training with Noisy Data")
+    history_phase1 = train_model(model, train_loader_phase1, val_loader, criterion, optimizer, device, args.epochs, args.adaptive, args.batch_size)
+
+    print("Starting Phase 2 Training with Clean Data")
+    history_phase2 = train_model(model, train_loader_phase2, val_loader, criterion, optimizer, device, args.epochs, args.adaptive, args.batch_size)
+
+    output_name = f"{args.dataset}_{args.model}_alpha_{args.alpha}_adaptive_{args.adaptive}_batch_size_{args.batch_size}_epochs_{args.epochs}_lr_{args.lr}_seed_{args.seed}"
+    output_dir = os.path.join(args.output_dir, output_name)
+    save_results(output_dir, output_name, {"phase1": history_phase1, "phase2": history_phase2})
+
+if __name__ == "__main__":
+    main()
+
