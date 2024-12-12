@@ -15,7 +15,7 @@ def get_parser():
     parser = argparse.ArgumentParser(description="Text classification pipeline for alpha beta tuning")
     parser.add_argument("--model", type=str, default="bert-base-uncased", help="Model architecture")
     parser.add_argument("--alpha", type=float, required=True, help="Alpha value for clean/noisy split")
-    parser.add_argument("--adaptive", type=bool, default=False, help="Adaptive batch size")
+    parser.add_argument("--adaptive", action="store_true", help="Use adaptive batch size for training")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--epochs", type=int, default=5, help="Number of epochs for training")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate for training")
@@ -116,7 +116,10 @@ def train_model(model, train_loader, val_loader, optimizer, device, epochs, adap
             train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
         model.train()
         running_loss = 0.0
-        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1} Training"):
+        
+        for i, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1} Training")):
+            if i == 0:
+                print("Current batch size: ", len(batch))
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["label"].to(device)
@@ -171,8 +174,8 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if device != "cuda":
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    # if device != "cuda":
+    #     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
     print(f"Using {device} for training")
 
@@ -200,7 +203,7 @@ def main():
 
         print("Training finished")
 
-        output_name = f"{args.dataset}_{args.model}_alpha_{args.alpha}_adaptive_{args.adaptive}_batch_size_{args.batch_size}_epochs_{args.epochs}_lr_{args.lr}_seed_{args.seed}"
+        output_name = f"Text_alpha_{args.alpha}_adaptive_{args.adaptive}"
         output_dir = os.path.join(args.output_dir, output_name)
         save_results(output_dir, output_name, {"phase1": history})
 
@@ -218,7 +221,7 @@ def main():
 
         print("Training finished")
 
-        output_name = f"{args.dataset}_{args.model}_alpha_{args.alpha}_adaptive_{args.adaptive}_batch_size_{args.batch_size}_epochs_{args.epochs}_lr_{args.lr}_seed_{args.seed}"
+        output_name = f"Text_alpha_{args.alpha}_adaptive_{args.adaptive}"
         output_dir = os.path.join(args.output_dir, output_name)
         save_results(output_dir, output_name, {"phase1": history})
 
@@ -238,7 +241,7 @@ def main():
         print("Starting Phase 2 Training with Clean Data")
         history_phase2 = train_model(model, train_loader_phase2, val_loader, optimizer, device, int(args.epochs//2), args.adaptive, args.batch_size, dataset_clean, args.seed)
 
-        output_name = f"{args.dataset}_{args.model}_alpha_{args.alpha}_adaptive_{args.adaptive}_batch_size_{args.batch_size}_epochs_{args.epochs}_lr_{args.lr}_seed_{args.seed}"
+        output_name = f"Text_alpha_{args.alpha}_adaptive_{args.adaptive}"
         output_dir = os.path.join(args.output_dir, output_name)
         save_results(output_dir, output_name, {"phase1": history_phase1, "phase2": history_phase2})
 
